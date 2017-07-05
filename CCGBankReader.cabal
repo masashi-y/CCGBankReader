@@ -15,7 +15,7 @@ cabal-version:       >=1.10
 
 library
   hs-source-dirs:      src
-  exposed-modules:     CCGBankReader
+  exposed-modules:     Data.CCGBankReader
   build-depends:       base >= 4.7 && < 5, parsec, text
   default-language:    Haskell2010
 

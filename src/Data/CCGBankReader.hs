@@ -1,14 +1,13 @@
 
 {-# LANGUAGE OverloadedStrings #-}
 
-module CCGBankReader (
+module Data.CCGBankReader (
   Feature(..),
   Cat(..),
   Tree(..),
-  category,
   readCats,
-  terminal,
-  nonterminal
+  -- parseCat,
+  readCCGBank
   ) where
 
 import Text.Parsec
@@ -48,28 +47,32 @@ instance Show Cat where
     show (Fwd res arg) = "(" ++ show res ++ "/" ++ show arg ++ ")"
     show (Bwd res arg) = "(" ++ show res ++ "\\" ++ show arg ++ ")"
 
-curly = between (char '{') (char '}')
+bracketed = between (char '(') (char ')')
+curly     = between (char '{') (char '}')
 
 feature :: Parsec String st Feature
 feature = Feature <$> (between (char '[') (char ']') $ keyValuePair `sepBy` (char ','))
     where keyValuePair = (,) <$> term <*> (char '=' *> term)
-          term = T.pack <$> many letter
+          term = T.pack <$> many (letter <|> digit)
 
 atomic :: Parsec String st Cat
-atomic = ((S <$ char 'S') <|> (S <$ string "NP")) <*> feature
+atomic = ((S <$ char 'S') <|> (NP <$ string "NP")) <*> feature
 
 slash :: Parsec String st (Cat -> Cat -> Cat)
 slash = (Fwd <$ char '/') <|> (Bwd <$ char '\\')
 
 binary :: Parsec String st Cat
-binary = between (char '(') (char ')') (apply <$> category <*> slash <*> category)
-    where apply res s arg = s res arg
+binary = bracketed $ do
+    c1 <- (atomic <* index) <|> bracketed (binary <* index)
+    s  <- slash
+    c2 <- (atomic <* index) <|> bracketed (binary <* index)
+    return $ s c1 c2
 
 category :: Parsec String st Cat
-category = (atomic <|> binary) <* (optional index)
+category = (atomic <|> binary) <* index
 
-index :: Parsec String st String
-index = curly (many $ noneOf "}") -- {I1}, {I2}
+index :: Parsec String st ()
+index = optional $ curly (many $ noneOf "}") -- {I1}, {I2}
 
 category' :: Parsec String st Cat
 category' = category <* (many $ noneOf " ") -- discard semantic role dependencies
@@ -83,9 +86,21 @@ combinatoryRule = T.pack <$> many1 (letter <|> digit <|> oneOf "<>")
 
 nonterminal :: Parsec String st Tree
 nonterminal = curly (Node <$> combinatoryRule <* space <*> category' <* space <*> child)
-    where child = (++) <$> (node) <*> (option [] (space *> node))
-          node = pure <$> ((try nonterminal) <|> terminal)
+    where child = (++) <$> node <*> option [] (space *> node)
+          node = pure <$> (try terminal <|> nonterminal)
 
+apply :: Parsec String () Tree -> String -> Tree
+apply p text = case parse p "" text of
+    Right c -> c
+    Left e  -> error $ show e
+
+readCats :: String -> IO [String]
 readCats fileName = do
     contents <- fmap lines $ readFile fileName
     return $ map ((!! 0) . words) contents
+
+readCCGBank :: String -> IO [Tree]
+readCCGBank fileName = do
+    contents <- fmap lines $ readFile fileName
+    let contents' = filter (not . null) contents
+    return $ map (apply (try terminal <|> nonterminal)) contents'
